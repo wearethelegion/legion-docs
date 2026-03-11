@@ -1,0 +1,384 @@
+---
+title: Plugins
+description: Escreva seus próprios plugins para estender o legion.
+---
+
+Plugins permitem que você estenda o legion conectando-se a vários eventos e personalizando o comportamento. Você pode criar plugins para adicionar novos recursos, integrar-se a serviços externos ou modificar o comportamento padrão do legion.
+
+Para exemplos, confira os [plugins](/docs/ecosystem#plugins) criados pela comunidade.
+
+---
+
+## Usando um plugin
+
+Existem duas maneiras de carregar plugins.
+
+---
+
+### De arquivos locais
+
+Coloque arquivos JavaScript ou TypeScript no diretório de plugins.
+
+- `.legion/plugins/` - Plugins em nível de projeto
+- `~/.config/legion/plugins/` - Plugins globais
+
+Os arquivos nesses diretórios são carregados automaticamente na inicialização.
+
+---
+
+### Do npm
+
+Especifique pacotes npm no seu arquivo de configuração.
+
+```json title="legion.json"
+{
+  "$schema": "https://wearethelegion.com/config.json",
+  "plugin": ["legion-helicone-session", "legion-wakatime", "@my-org/custom-plugin"]
+}
+```
+
+Pacotes npm regulares e escopados são suportados.
+
+Navegue pelos plugins disponíveis no [ecossistema](/docs/ecosystem#plugins).
+
+---
+
+### Como os plugins são instalados
+
+**Plugins npm** são instalados automaticamente usando Bun na inicialização. Pacotes e suas dependências são armazenados em cache em `~/.cache/legion/node_modules/`.
+
+**Plugins locais** são carregados diretamente do diretório de plugins. Para usar pacotes externos, você deve criar um `package.json` dentro do seu diretório de configuração (veja [Dependências](#dependencies)), ou publicar o plugin no npm e [adicioná-lo à sua configuração](/docs/config#plugins).
+
+---
+
+### Ordem de carregamento
+
+Os plugins são carregados de todas as fontes e todos os hooks são executados em sequência. A ordem de carregamento é:
+
+1. Configuração global (`~/.config/legion/legion.json`)
+2. Configuração do projeto (`legion.json`)
+3. Diretório de plugins global (`~/.config/legion/plugins/`)
+4. Diretório de plugins do projeto (`.legion/plugins/`)
+
+Pacotes npm duplicados com o mesmo nome e versão são carregados uma vez. No entanto, um plugin local e um plugin npm com nomes semelhantes são carregados separadamente.
+
+---
+
+## Criando um plugin
+
+Um plugin é um **módulo JavaScript/TypeScript** que exporta uma ou mais funções de plugin. Cada função recebe um objeto de contexto e retorna um objeto de hooks.
+
+---
+
+### Dependências
+
+Plugins locais e ferramentas personalizadas podem usar pacotes npm externos. Adicione um `package.json` ao seu diretório de configuração com as dependências necessárias.
+
+```json title=".legion/package.json"
+{
+  "dependencies": {
+    "shescape": "^2.1.0"
+  }
+}
+```
+
+O legion executa `bun install` na inicialização para instalar esses pacotes. Seus plugins e ferramentas podem então importá-los.
+
+```ts title=".legion/plugins/my-plugin.ts"
+import { escape } from "shescape"
+
+export const MyPlugin = async (ctx) => {
+  return {
+    "tool.execute.before": async (input, output) => {
+      if (input.tool === "bash") {
+        output.args.command = escape(output.args.command)
+      }
+    },
+  }
+}
+```
+
+---
+
+### Estrutura básica
+
+```js title=".legion/plugins/example.js"
+export const MyPlugin = async ({ project, client, $, directory, worktree }) => {
+  console.log("Plugin initialized!")
+
+  return {
+    // Hook implementations go here
+  }
+}
+```
+
+A função do plugin recebe:
+
+- `project`: As informações do projeto atual.
+- `directory`: O diretório de trabalho atual.
+- `worktree`: O caminho do worktree do git.
+- `client`: Um cliente SDK do legion para interagir com a AI.
+- `$`: A [API shell](https://bun.com/docs/runtime/shell) do Bun para executar comandos.
+
+---
+
+### Suporte a TypeScript
+
+Para plugins TypeScript, você pode importar tipos do pacote de plugin:
+
+```ts title="my-plugin.ts" {1}
+import type { Plugin } from "@wearethelegion/plugin"
+
+export const MyPlugin: Plugin = async ({ project, client, $, directory, worktree }) => {
+  return {
+    // Type-safe hook implementations
+  }
+}
+```
+
+---
+
+### Eventos
+
+Plugins podem se inscrever em eventos como visto abaixo na seção Exemplos. Aqui está uma lista dos diferentes eventos disponíveis.
+
+#### Eventos de Comando
+
+- `command.executed`
+
+#### Eventos de Arquivo
+
+- `file.edited`
+- `file.watcher.updated`
+
+#### Eventos de Instalação
+
+- `installation.updated`
+
+#### Eventos LSP
+
+- `lsp.client.diagnostics`
+- `lsp.updated`
+
+#### Eventos de Mensagem
+
+- `message.part.removed`
+- `message.part.updated`
+- `message.removed`
+- `message.updated`
+
+#### Eventos de Permissão
+
+- `permission.asked`
+- `permission.replied`
+
+#### Eventos de Servidor
+
+- `server.connected`
+
+#### Eventos de Sessão
+
+- `session.created`
+- `session.compacted`
+- `session.deleted`
+- `session.diff`
+- `session.error`
+- `session.idle`
+- `session.status`
+- `session.updated`
+
+#### Eventos de Todo
+
+- `todo.updated`
+
+#### Eventos de Shell
+
+- `shell.env`
+
+#### Eventos de Ferramenta
+
+- `tool.execute.after`
+- `tool.execute.before`
+
+#### Eventos TUI
+
+- `tui.prompt.append`
+- `tui.command.execute`
+- `tui.toast.show`
+
+---
+
+## Exemplos
+
+Aqui estão alguns exemplos de plugins que você pode usar para estender o legion.
+
+---
+
+### Enviando notificações
+
+Envie notificações quando certos eventos ocorrerem:
+
+```js title=".legion/plugins/notification.js"
+export const NotificationPlugin = async ({ project, client, $, directory, worktree }) => {
+  return {
+    event: async ({ event }) => {
+      // Send notification on session completion
+      if (event.type === "session.idle") {
+        await $`osascript -e 'display notification "Session completed!" with title "legion"'`
+      }
+    },
+  }
+}
+```
+
+Estamos usando `osascript` para executar AppleScript no macOS. Aqui estamos usando para enviar notificações.
+
+:::note
+Se você estiver usando o aplicativo desktop legion, ele pode enviar notificações do sistema automaticamente quando uma resposta estiver pronta ou quando ocorrer um erro na sessão.
+:::
+
+---
+
+### Proteção .env
+
+Impeça o legion de ler arquivos `.env`:
+
+```javascript title=".legion/plugins/env-protection.js"
+export const EnvProtection = async ({ project, client, $, directory, worktree }) => {
+  return {
+    "tool.execute.before": async (input, output) => {
+      if (input.tool === "read" && output.args.filePath.includes(".env")) {
+        throw new Error("Do not read .env files")
+      }
+    },
+  }
+}
+```
+
+---
+
+### Injetando variáveis de ambiente
+
+Injete variáveis de ambiente em todas as execuções de shell (ferramentas de AI e terminais de usuário):
+
+```javascript title=".legion/plugins/inject-env.js"
+export const InjectEnvPlugin = async () => {
+  return {
+    "shell.env": async (input, output) => {
+      output.env.MY_API_KEY = "secret"
+      output.env.PROJECT_ROOT = input.cwd
+    },
+  }
+}
+```
+
+---
+
+### Ferramentas personalizadas
+
+Plugins também podem adicionar ferramentas personalizadas ao legion:
+
+```ts title=".legion/plugins/custom-tools.ts"
+import { type Plugin, tool } from "@wearethelegion/plugin"
+
+export const CustomToolsPlugin: Plugin = async (ctx) => {
+  return {
+    tool: {
+      mytool: tool({
+        description: "This is a custom tool",
+        args: {
+          foo: tool.schema.string(),
+        },
+        async execute(args, context) {
+          const { directory, worktree } = context
+          return `Hello ${args.foo} from ${directory} (worktree: ${worktree})`
+        },
+      }),
+    },
+  }
+}
+```
+
+O helper `tool` cria uma ferramenta personalizada que o legion pode chamar. Ele aceita uma função de esquema Zod e retorna uma definição de ferramenta com:
+
+- `description`: O que a ferramenta faz
+- `args`: Esquema Zod para os argumentos da ferramenta
+- `execute`: Função que é executada quando a ferramenta é chamada
+
+Suas ferramentas personalizadas estarão disponíveis para o legion junto com as ferramentas integradas.
+
+---
+
+### Registro
+
+Use `client.app.log()` em vez de `console.log` para registro estruturado:
+
+```ts title=".legion/plugins/my-plugin.ts"
+export const MyPlugin = async ({ client }) => {
+  await client.app.log({
+    body: {
+      service: "my-plugin",
+      level: "info",
+      message: "Plugin initialized",
+      extra: { foo: "bar" },
+    },
+  })
+}
+```
+
+Níveis: `debug`, `info`, `warn`, `error`. Veja a [documentação do SDK](https://wearethelegion.com/docs/sdk) para detalhes.
+
+---
+
+### Hooks de compactação
+
+Personalize o contexto incluído quando uma sessão é compactada:
+
+```ts title=".legion/plugins/compaction.ts"
+import type { Plugin } from "@wearethelegion/plugin"
+
+export const CompactionPlugin: Plugin = async (ctx) => {
+  return {
+    "experimental.session.compacting": async (input, output) => {
+      // Inject additional context into the compaction prompt
+      output.context.push(`
+## Custom Context
+
+Include any state that should persist across compaction:
+- Current task status
+- Important decisions made
+- Files being actively worked on
+`)
+    },
+  }
+}
+```
+
+O hook `experimental.session.compacting` é acionado antes que o LLM gere um resumo de continuação. Use-o para injetar contexto específico de domínio que o prompt de compactação padrão poderia perder.
+
+Você também pode substituir o prompt de compactação completamente definindo `output.prompt`:
+
+```ts title=".legion/plugins/custom-compaction.ts"
+import type { Plugin } from "@wearethelegion/plugin"
+
+export const CustomCompactionPlugin: Plugin = async (ctx) => {
+  return {
+    "experimental.session.compacting": async (input, output) => {
+      // Replace the entire compaction prompt
+      output.prompt = `
+You are generating a continuation prompt for a multi-agent swarm session.
+
+Summarize:
+1. The current task and its status
+2. Which files are being modified and by whom
+3. Any blockers or dependencies between agents
+4. The next steps to complete the work
+
+Format as a structured prompt that a new agent can use to resume work.
+`
+    },
+  }
+}
+```
+
+Quando `output.prompt` é definido, ele substitui completamente o prompt de compactação padrão. O array `output.context` é ignorado neste caso.
